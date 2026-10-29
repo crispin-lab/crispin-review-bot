@@ -54,5 +54,9 @@ ln -sfn "$PCR_HOME/skill" ~/.claude/skills/pr-code-review
    "Accessible from repositories in the 'crispin-lab' organization" 을 켠다.
 4. 레포 설정에서 fork PR 에 쓰기 토큰을 보내는 옵션이 꺼져 있는지 확인한다.
 5. 대상 레포에 `examples/pcr.yml` 을 `.github/workflows/pcr.yml` 로 복사한다.
-6. `crispin-review-bot` 레포에 ruleset 을 건다: `main` 과 `v*` 태그는 삭제 · 강제 push · 직접 갱신 금지.
+6. 자체 러너를 쓰면 repository variable `PCR_RUNNER` (없으면 `CI_RUNNER`) 에 러너 라벨을 넣는다.
+   러너에는 `gh` · `git` · `curl` 만 있으면 된다 (Python · Node · `claude` 는 Action 이 받는다).
+   러너 사용자의 `~/.claude` 는 쓰지 않지만, 그 계정이 Claude Code 에 로그인돼 있으면 로그인 정보가
+   federation 보다 먼저 잡히는지 첫 실행 로그 · Console 사용량으로 확인한다.
+7. `crispin-review-bot` 레포에 ruleset 을 건다: `main` 과 `v*` 태그는 삭제 · 강제 push · 직접 갱신 금지.
    태그를 옮길 수 있으면 `@v1` 을 쓰는 모든 레포의 봇 PAT 가 그 코드에 노출된다.
