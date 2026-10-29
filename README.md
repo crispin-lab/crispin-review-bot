@@ -41,7 +41,9 @@ examples/pcr.yml     대상 레포에 복사할 워크플로
   fork PR 에는 secret · `id-token: write` 가 전달되지 않아 자동 리뷰가 돌지 않는다.
 - **`/pcr` 명령**: OWNER · MEMBER 만 실행된다 (워크플로 `if` 와 코드에서 두 번 확인).
 - **공급망**: 이 레포에 push 할 수 있는 사람은 봇 PAT 와 Anthropic 토큰을 쥔 코드를 바꿀 수 있다.
-  `main` 과 `v*` 태그를 ruleset 으로 보호하고, 호출하는 레포는 가능하면 `@v1` 대신 커밋 SHA 로 고정한다.
+  `main` 과 `v*` 태그를 ruleset 으로 보호한다 (태그 생성 · 이동은 관리자만). 호출하는 레포는 `@v1` 을 쓰므로
+  **`v1` 을 옮기는 순간 모든 레포에 리뷰 없이 적용된다** — 옮기기 전에 `main` 의 변경을 확인한다.
+  레포 · 사람이 늘면 커밋 SHA 고정 + 버전 태그(`v1.0.x`) + Dependabot 으로 바꾼다.
 
 ## 사용
 
@@ -58,3 +60,10 @@ python3 -m unittest discover -s tests -t .
 
 배포는 태그로 한다. 대상 레포는 `crispin-lab/crispin-review-bot@v1` 을 쓰므로, 호환되는 변경은
 `v1` 태그를 옮기고 깨지는 변경은 `v2` 를 만든다.
+
+```bash
+git fetch origin main && git tag -f v1 origin/main && git push -f origin v1
+```
+
+`examples/pcr.yml` (트리거 · `if` · 권한 · 러너) 을 바꾼 릴리스는 태그만으로 반영되지 않는다 — 각 레포가
+복사해 쓰는 파일이라 레포마다 `.github/workflows/pcr.yml` 을 같이 고친다.
