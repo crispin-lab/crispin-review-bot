@@ -1,0 +1,25 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["replies"],
+  "properties": {
+    "replies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["threadId", "intent", "fix_confirmed", "reply_body", "should_resolve"],
+        "properties": {
+          "threadId": { "type": "string", "description": "입력으로 받은 스레드 id 를 그대로" },
+          "intent": {
+            "type": "string",
+            "enum": ["fixed", "disagreement", "clarification_request", "agreement", "question"]
+          },
+          "fix_confirmed": { "type": "boolean" },
+          "reply_body": { "type": "string", "maxLength": 1200 },
+          "should_resolve": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,106 @@
+name: crispin-review-bot
+description: crispin-lab PR 리뷰 · 답글 (Workload Identity Federation 으로 Claude 인증)
+
+inputs:
+  bot-token:
+    description: 리뷰를 게시할 봇 계정의 PAT (crispin-bot)
+    required: true
+  federation-rule-id:
+    description: Claude Console 의 federation rule id (fdrl_...)
+    required: true
+  organization-id:
+    description: Anthropic organization id
+    required: true
+  service-account-id:
+    description: 서비스 계정 id (svac_...)
+    required: true
+  workspace-id:
+    description: rule 이 여러 워크스페이스를 가리킬 때만 (wrkspc_...)
+    required: false
+    default: ""
+  model:
+    description: 리뷰 · 답글 분류 모델
+    required: false
+    default: claude-opus-5-5
+  critic-model:
+    description: --with-critic 비평 모델
+    required: false
+    default: claude-sonnet-5-5
+  default-args:
+    description: pull_request 이벤트로 자동 리뷰할 때 붙일 플래그 (예 "--with-critic")
+    required: false
+    default: ""
+  allowed-associations:
+    description: "/pcr 명령을 허용할 author_association (쉼표 구분)"
+    required: false
+    default: OWNER,MEMBER
+  legacy-bot-logins:
+    description: 이전 봇 계정 (지문 · 스레드를 같은 봇으로 인정, 쉼표 구분)
+    required: false
+    default: ""
+  max-budget-usd:
+    description: 실행 한 번의 판단 단계 비용 상한
+    required: false
+    default: "5"
+  claude-code-version:
+    description: "@anthropic-ai/claude-code 버전"
+    required: false
+    default: 2.1.296
+
+runs:
+  using: composite
+  steps:
+    - name: 판단 단계 CLI 준비
+      shell: bash
+      env:
+        CLAUDE_CODE_VERSION: ${{ inputs.claude-code-version }}
+      run: |
+        if ! command -v claude >/dev/null 2>&1; then
+          npm install --global --no-fund --no-audit "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" >/dev/null
+        fi
+        claude --version
+
+    - name: 리뷰 실행
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.bot-token }}
+        ANTHROPIC_FEDERATION_RULE_ID: ${{ inputs.federation-rule-id }}
+        ANTHROPIC_ORGANIZATION_ID: ${{ inputs.organization-id }}
+        ANTHROPIC_SERVICE_ACCOUNT_ID: ${{ inputs.service-account-id }}
+        ANTHROPIC_WORKSPACE_ID: ${{ inputs.workspace-id }}
+        PCR_MODEL: ${{ inputs.model }}
+        PCR_MODEL_CRITIC: ${{ inputs.critic-model }}
+        PCR_DEFAULT_ARGS: ${{ inputs.default-args }}
+        PCR_ALLOWED_ASSOCIATIONS: ${{ inputs.allowed-associations }}
+        PCR_LEGACY_BOT_LOGINS: ${{ inputs.legacy-bot-logins }}
+        PCR_MAX_BUDGET_USD: ${{ inputs.max-budget-usd }}
+      run: |
+        set -euo pipefail
+
+        if [ -z "${GH_TOKEN}" ]; then
+          echo "봇 토큰이 없습니다 (fork PR 에는 secret 이 전달되지 않습니다). 건너뜁니다."
+          exit 0
+        fi
+        if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+          echo "::error::job 에 'id-token: write' 권한이 필요합니다."
+          exit 1
+        fi
+        [ -n "${ANTHROPIC_WORKSPACE_ID}" ] || unset ANTHROPIC_WORKSPACE_ID
+        # 정적 자격증명이 있으면 federation 보다 우선하므로 확실히 비운다.
+        unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_AUTH_TOKEN
+
+        export ANTHROPIC_IDENTITY_TOKEN_FILE="${RUNNER_TEMP}/pcr-oidc.jwt"
+        fetch_identity_token() {
+          curl -sSf -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https://api.anthropic.com" \
+            | jq -r .value > "${ANTHROPIC_IDENTITY_TOKEN_FILE}.tmp"
+          mv "${ANTHROPIC_IDENTITY_TOKEN_FILE}.tmp" "${ANTHROPIC_IDENTITY_TOKEN_FILE}"
+        }
+        fetch_identity_token
+        # GitHub OIDC 토큰은 약 5분 뒤 만료된다. 긴 리뷰 중에도 파일이 유효하게 갱신한다.
+        ( while sleep 240; do fetch_identity_token || true; done ) &
+        refresher=$!
+        trap 'kill "${refresher}" 2>/dev/null || true' EXIT
+
+        export PCR_WORK_DIR="${RUNNER_TEMP}/pcr"
+        "${GITHUB_ACTION_PATH}/bin/pcr" ci

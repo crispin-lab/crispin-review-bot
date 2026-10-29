@@ -1,0 +1,49 @@
+# 대상 레포의 .github/workflows/pcr.yml 로 복사해서 쓴다.
+name: PR review
+
+on:
+  pull_request:
+    types: [ready_for_review]
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: PR 번호
+        required: true
+      args:
+        description: 플래그 (예 "--dry-run --focus security")
+        required: false
+        default: ""
+
+concurrency:
+  # 게시 도중에 끊기면 리뷰가 반쯤 남을 수 있어 취소하지 않고 줄 세운다.
+  group: pcr-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr_number }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  pcr:
+    # 러너를 띄우기 전에 걸러 낸다. 같은 검사를 pcr 도 다시 한다.
+    if: >-
+      (github.event_name == 'pull_request' && !github.event.pull_request.draft) ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request &&
+        startsWith(github.event.comment.body, '/pcr') &&
+        contains(fromJSON('["OWNER","MEMBER"]'), github.event.comment.author_association)) ||
+      (github.event_name == 'pull_request_review_comment' && github.event.comment.in_reply_to_id &&
+        github.event.comment.user.login != 'crispin-bot') ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: crispin-lab/crispin-review-bot@v1
+        with:
+          bot-token: ${{ secrets.CRISPIN_BOT_TOKEN }}
+          federation-rule-id: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
+          organization-id: ${{ vars.ANTHROPIC_ORGANIZATION_ID }}
+          service-account-id: ${{ vars.ANTHROPIC_SERVICE_ACCOUNT_ID }}

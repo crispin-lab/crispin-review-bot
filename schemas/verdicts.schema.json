@@ -1,0 +1,20 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["verdicts"],
+  "properties": {
+    "verdicts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["fingerprint", "keep", "reason"],
+        "properties": {
+          "fingerprint": { "type": "string" },
+          "keep": { "type": "boolean" },
+          "reason": { "type": "string", "maxLength": 200 }
+        }
+      }
+    }
+  }
+}
