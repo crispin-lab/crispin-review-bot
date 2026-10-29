@@ -31,13 +31,30 @@ _FORBIDDEN_PATTERNS = [
 ]
 
 
+# 비밀값처럼 보이는 문자열. 판단 단계가 속아 비밀값을 본문에 실어도 공개 레포에 올라가지 않게 한다.
+_SECRET_PATTERNS = [
+    re.compile(r"\b(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{30,}"),
+    re.compile(r"\bgithub_pat_[A-Za-z0-9_]{40,}"),
+    re.compile(r"\bsk-ant-[A-Za-z0-9_-]{20,}"),
+    re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"),
+    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
+]
+
+
 class AttributionError(ValueError):
+    pass
+
+
+class SecretLeakError(ValueError):
     pass
 
 
 def sanitize(body: str) -> str:
     lines = [line for line in body.splitlines() if not _is_attribution_line(line)]
     cleaned = "\n".join(_drop_dangling_rule(lines)).rstrip() + "\n"
+    for pattern in _SECRET_PATTERNS:
+        if pattern.search(cleaned):
+            raise SecretLeakError("게시 본문에 비밀값으로 보이는 문자열이 있어 게시하지 않습니다.")
     for pattern in _FORBIDDEN_PATTERNS:
         match = pattern.search(cleaned)
         if match:

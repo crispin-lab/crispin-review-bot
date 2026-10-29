@@ -44,3 +44,5 @@ ln -sfn "$PCR_HOME/skill" ~/.claude/skills/pr-code-review
    "Accessible from repositories in the 'crispin-lab' organization" 을 켠다.
 4. 레포 설정에서 fork PR 에 쓰기 토큰을 보내는 옵션이 꺼져 있는지 확인한다.
 5. 대상 레포에 `examples/pcr.yml` 을 `.github/workflows/pcr.yml` 로 복사한다.
+6. `crispin-review-bot` 레포에 ruleset 을 건다: `main` 과 `v*` 태그는 삭제 · 강제 push · 직접 갱신 금지.
+   태그를 옮길 수 있으면 `@v1` 을 쓰는 모든 레포의 봇 PAT 가 그 코드에 노출된다.

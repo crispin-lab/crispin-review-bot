@@ -45,7 +45,7 @@ inputs:
   claude-code-version:
     description: "@anthropic-ai/claude-code 버전"
     required: false
-    default: 2.1.296
+    default: 2.1.312
 
 runs:
   using: composite

@@ -6,7 +6,7 @@ from pcr.diff import commentable_lines, is_generated
 from pcr.fingerprint import finding_fingerprint, markers_in, strip_markers, summary_fingerprint
 from pcr.judge import validate
 from pcr.reply import _keep
-from pcr.sanitize import AttributionError, sanitize
+from pcr.sanitize import AttributionError, SecretLeakError, sanitize
 from pcr.target import ArgsError, Target, parse, parse_command
 
 PATCH = """diff --git a/src/a.ts b/src/a.ts
@@ -41,6 +41,17 @@ class SanitizeTest(unittest.TestCase):
         for body in ["이 리뷰는 AI 가 생성한 내용입니다.", "This is AI-generated feedback.", "Claude 가 작성한 답글"]:
             with self.assertRaises(AttributionError, msg=body):
                 sanitize(body)
+
+    def test_secret_like_strings_are_rejected(self):
+        secrets = [
+            "ghp_" + "a" * 36,
+            "github_pat_" + "b" * 60,
+            "sk-ant-oat01-" + "c" * 40,
+            "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJyZXBvOngifQ.c2lnbmF0dXJlc2lnbmF0dXJl",
+        ]
+        for secret in secrets:
+            with self.assertRaises(SecretLeakError, msg=secret[:12]):
+                sanitize(f"환경 변수 값: {secret}")
 
     def test_normal_review_text_passes(self):
         body = "`claude -p` 호출에 `--bare` 를 주면 OAuth 를 읽지 않습니다.\n\n<!-- pcr:0123456789ab -->"
@@ -162,3 +173,32 @@ class SummaryTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class JudgeIsolationTest(unittest.TestCase):
+    def test_no_broad_read_permission_and_tokens_scrubbed(self):
+        import json
+        import os
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+
+        from pcr import judge
+
+        captured = {}
+
+        def fake_run(command, **kwargs):
+            captured["command"], captured["env"] = command, kwargs["env"]
+            out = json.dumps({"is_error": False, "structured_output": {"verdicts": []}})
+            return mock.Mock(returncode=0, stdout=out, stderr="")
+
+        secrets = {"GH_TOKEN": "x", "GITHUB_TOKEN": "y", "ACTIONS_ID_TOKEN_REQUEST_TOKEN": "z"}
+        with tempfile.TemporaryDirectory() as root, mock.patch.dict(os.environ, secrets), \
+                mock.patch.object(judge.subprocess, "run", fake_run):
+            judge.ask("critic", "t", "verdicts", tree=Path(root) / "tree", sandbox=Path(root) / "sandbox")
+
+        # 읽기 도구를 넓게 허용하면 체크아웃 밖까지 읽힌다.
+        self.assertNotIn("--allowedTools", captured["command"])
+        self.assertIn("Bash", captured["command"])
+        for key in secrets:
+            self.assertNotIn(key, captured["env"])

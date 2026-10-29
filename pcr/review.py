@@ -279,7 +279,8 @@ def _summary(context, raw, inline, unplaced, critic_note, run_id) -> str:
         sections.append("## Themes\n" + "\n".join(themes))
 
     if context.convention_files:
-        conventions = f"{len(context.convention_files)} rule files loaded from PR head @ {context.head_sha[:7]}."
+        source = "PR head" if context.conventions_from == "head" else "base branch (fork PR)"
+        conventions = f"{len(context.convention_files)} rule files loaded from {source} @ {(context.conventions_sha or context.head_sha)[:7]}."
     else:
         conventions = "none loaded (.claude/CLAUDE.md 없음)."
     sections.append(f"## Conventions\n{conventions}")

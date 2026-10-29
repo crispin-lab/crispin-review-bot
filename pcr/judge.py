@@ -3,7 +3,11 @@
 - 로컬은 사용자의 Claude Code 로그인, CI 는 Workload Identity Federation 환경 변수로 인증된다.
 - PR head 체크아웃은 `--add-dir` 로만 열고 작업 디렉토리는 빈 디렉토리다. head 의
   `.claude/settings.json` (hooks 등) 이 실행되지 않게 project 설정은 읽지 않는다.
-- 쓰기 · 셸 · 웹 도구는 주지 않는다. GitHub 게시는 이 단계가 아니라 코드가 한다.
+- 읽기 도구를 `--allowedTools` 로 허용하지 않는다. 넓게 허용하면 체크아웃 밖(`/proc/self/environ`,
+  OIDC 토큰 파일 등)까지 읽혀, PR 에 심은 지시로 비밀값이 리뷰 본문에 실려 공개될 수 있다.
+  허용 목록이 없으면 작업 디렉토리 · `--add-dir` 안에서만 읽고 나머지는 거부된다.
+- 쓰기 · 셸 · 웹 도구는 막는다. GitHub 게시는 이 단계가 아니라 코드가 한다.
+- 자식 프로세스 환경에서 GitHub 토큰 · OIDC 요청 자격을 지운다.
 """
 
 import json
@@ -12,8 +16,15 @@ import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-_READ_ONLY_TOOLS = ["Read", "Grep", "Glob"]
 _DENIED_TOOLS = ["Bash", "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch"]
+_SCRUBBED_ENV = (
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "GH_ENTERPRISE_TOKEN",
+    "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+    "ACTIONS_ID_TOKEN_REQUEST_URL",
+    "ACTIONS_RUNTIME_TOKEN",
+)
 
 
 class JudgeError(RuntimeError):
@@ -48,9 +59,10 @@ def ask(stage: str, text: str, schema_name: str, *, tree: Path, sandbox: Path) -
     ]
     if os.environ.get("PCR_MAX_BUDGET_USD"):
         command += ["--max-budget-usd", os.environ["PCR_MAX_BUDGET_USD"]]
-    command += ["--add-dir", str(tree), "--allowedTools", *_READ_ONLY_TOOLS, "--disallowedTools", *_DENIED_TOOLS]
+    command += ["--add-dir", str(tree), "--disallowedTools", *_DENIED_TOOLS]
 
-    result = subprocess.run(command, input=text, cwd=sandbox, capture_output=True, text=True, check=False)
+    env = {key: value for key, value in os.environ.items() if key not in _SCRUBBED_ENV}
+    result = subprocess.run(command, input=text, cwd=sandbox, env=env, capture_output=True, text=True, check=False)
     if result.returncode != 0:
         raise JudgeError(f"{stage} 단계 claude 실행 실패: {(result.stderr or result.stdout).strip()[:500]}")
     payload = _extract(result.stdout)

@@ -41,6 +41,8 @@ class Context:
     prior_findings: list[str]
     conventions: str
     convention_files: list[str]
+    conventions_from: str = "head"
+    conventions_sha: str = ""
     warnings: list[str] = field(default_factory=list)
 
     @property
@@ -77,7 +79,11 @@ def collect(target: Target, *, with_prior: bool = True) -> tuple[Context, str]:
 
     logins = bot_logins()
     tree = checkout(target, head_sha)
-    conventions, convention_files = load_conventions(tree)
+    # fork PR 은 작성자가 head 의 .claude/ 룰을 고쳐 지적을 피해 갈 수 있다 → base 의 룰로 본다.
+    head_repo = (pr["head"].get("repo") or {}).get("full_name")
+    from_fork = head_repo != target.slug
+    rules_tree = checkout(target, pr["base"]["sha"], name="base-tree") if from_fork else tree
+    conventions, convention_files = load_conventions(rules_tree)
     prior_fps, prior_bodies = (_prior_bot_findings(target, logins) if with_prior else ([], []))
 
     context = Context(
@@ -102,13 +108,15 @@ def collect(target: Target, *, with_prior: bool = True) -> tuple[Context, str]:
         prior_findings=prior_bodies,
         conventions=conventions,
         convention_files=convention_files,
+        conventions_from="base" if from_fork else "head",
+        conventions_sha=pr["base"]["sha"] if from_fork else head_sha,
     )
     return context, patch
 
 
-def checkout(target: Target, sha: str) -> Path:
-    """head SHA 를 얕게 받아 둔다. 컨벤션은 로컬 체크아웃이 아니라 PR head 기준이어야 한다."""
-    tree = work_dir(target) / "tree"
+def checkout(target: Target, sha: str, *, name: str = "tree") -> Path:
+    """SHA 를 얕게 받아 둔다. 컨벤션은 로컬 체크아웃이 아니라 PR 의 커밋 기준이어야 한다."""
+    tree = work_dir(target) / name
     if (tree / ".git").exists() and _git(tree, "rev-parse", "HEAD").strip() == sha:
         return tree
     tree.mkdir(parents=True, exist_ok=True)

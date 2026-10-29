@@ -10,7 +10,7 @@ import sys
 from . import ci, judge, review
 from .gh import GhError
 from .judge import JudgeError
-from .sanitize import AttributionError
+from .sanitize import AttributionError, SecretLeakError
 from .target import ArgsError, parse, parse_target
 
 HELP_PATH = judge.ROOT / "skill" / "HELP.ko.md"
@@ -20,7 +20,7 @@ def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     try:
         return _dispatch(argv)
-    except (ArgsError, GhError, JudgeError, AttributionError) as error:
+    except (ArgsError, GhError, JudgeError, AttributionError, SecretLeakError) as error:
         print(f"오류: {error}", file=sys.stderr)
         return 2
 
