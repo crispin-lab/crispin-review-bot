@@ -2,11 +2,21 @@
 
 ## 공통 — 봇 PAT
 
-crispin-bot 계정으로 fine-grained PAT 를 만든다.
+crispin-bot 계정으로 **fine-grained** PAT 를 만든다. 대상 레포가 private 이라 classic PAT 는 `repo` 전체
+권한(코드 쓰기 포함)이 필요해 쓰지 않는다.
 
-- Repository access: 리뷰 대상 레포 + `crispin-review-bot`
-- Permissions: Contents **Read**, Issues **Read and write** (👀/🎉), Pull requests **Read and write** (리뷰 · 답글 · resolve)
-- 만료일을 정하고 갱신 일정을 잡아 둔다.
+1. 사전 조건 (org 관리자 계정으로)
+   - crispin-bot 이 crispin-lab **멤버**여야 Resource owner 에 org 가 보인다. 멤버로 초대하고
+     Settings → Member privileges → Base permissions 는 **No permission** 으로 둔다.
+   - 각 대상 레포의 Collaborators and teams 에서 crispin-bot 에 **Write** 를 준다 (스레드 resolve 에 필요).
+   - Settings → Personal access tokens → Settings 에서 fine-grained 토큰 접근을 허용한다.
+     관리자 승인을 켜 두었다면 발급 후 Pending requests 에서 승인한다.
+2. 발급 (crispin-bot 계정으로) — Settings → Developer settings → Fine-grained tokens
+   - Resource owner: **crispin-lab** · Repository access: **Only select repositories** → 대상 레포만
+   - Permissions: Contents **Read-only**, Issues **Read and write**, Pull requests **Read and write**
+   - 만료일을 정하고 갱신 일정을 잡아 둔다.
+3. `crispin-review-bot` 은 범위에 넣지 않는다. 공개 레포라 Actions 가 토큰 없이 가져오고,
+   봇이 이 레포에 접근하지 못하는 편이 공급망 측면에서 안전하다.
 
 ## 로컬
 
