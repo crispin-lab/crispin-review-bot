@@ -239,3 +239,21 @@ class CiReviewCommentTest(unittest.TestCase):
         execute = self.run_event("MEMBER")
         execute.assert_called_once()
         self.assertTrue(execute.call_args.args[0].reply)
+
+
+class FailureReasonTest(unittest.TestCase):
+    def test_reason_field_survives_long_envelope(self):
+        import json
+
+        from pcr.judge import failure_reason
+
+        envelope = {"type": "result", "subtype": "error_during_execution", "usage": {"x": "y" * 2000},
+                    "is_error": True, "result": "API Error: 401 Authentication failed"}
+        reason = failure_reason(json.dumps(envelope), "")
+        self.assertIn("401 Authentication failed", reason)
+        self.assertIn("Workload identity", reason)
+
+    def test_non_json_output_keeps_tail(self):
+        from pcr.judge import failure_reason
+
+        self.assertIn("끝", failure_reason("앞" * 2000 + "끝", ""))

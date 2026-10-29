@@ -66,12 +66,37 @@ def ask(stage: str, text: str, schema_name: str, *, tree: Path, sandbox: Path) -
     env = {key: value for key, value in os.environ.items() if key not in _SCRUBBED_ENV}
     result = subprocess.run(command, input=text, cwd=sandbox, env=env, capture_output=True, text=True, check=False)
     if result.returncode != 0:
-        raise JudgeError(f"{stage} 단계 claude 실행 실패: {(result.stderr or result.stdout).strip()[:500]}")
+        raise JudgeError(f"{stage} 단계 claude 실행 실패: {failure_reason(result.stdout, result.stderr)}")
     payload = _extract(result.stdout)
     errors = validate(payload, target_schema)
     if errors:
         raise JudgeError(f"{stage} 단계 출력이 스키마와 맞지 않습니다: {'; '.join(errors[:5])}")
     return payload
+
+
+def failure_reason(stdout: str, stderr: str) -> str:
+    """CLI 결과 JSON 에서 실패 사유만 뽑는다. 원문을 앞에서 자르면 사유 필드가 잘려 나간다."""
+    try:
+        envelope = json.loads(stdout)
+    except (json.JSONDecodeError, TypeError):
+        envelope = None
+    parts = []
+    if isinstance(envelope, dict):
+        parts.append(f"subtype={envelope.get('subtype')}")
+        for key in ("result", "error", "errors"):
+            if envelope.get(key):
+                parts.append(f"{key}={str(envelope[key]).strip()[:800]}")
+    elif stdout.strip():
+        parts.append(stdout.strip()[-800:])
+    if stderr.strip():
+        parts.append(f"stderr={stderr.strip()[-800:]}")
+    reason = " · ".join(parts) or "(출력 없음)"
+    if "authentication" in reason.lower() or "401" in reason:
+        reason += (
+            " — 인증 실패입니다. CI 라면 Claude Console 의 Workload identity → History 에서 거부 사유를 보고, "
+            "이 레포용 federation rule 의 subject prefix (repo:<owner>/<repo>:) 와 rule id 변수를 확인해 주세요."
+        )
+    return reason
 
 
 def _extract(stdout: str) -> dict:
@@ -80,7 +105,7 @@ def _extract(stdout: str) -> dict:
     except json.JSONDecodeError as error:
         raise JudgeError(f"claude 출력을 해석하지 못했습니다: {error}") from error
     if envelope.get("is_error"):
-        raise JudgeError(f"claude 가 오류로 종료했습니다: {str(envelope.get('result'))[:500]}")
+        raise JudgeError(f"claude 가 오류로 종료했습니다: {failure_reason(stdout, '')}")
     if isinstance(envelope.get("structured_output"), dict):
         return envelope["structured_output"]
     text = str(envelope.get("result") or "").strip()
