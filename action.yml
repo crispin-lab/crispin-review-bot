@@ -50,11 +50,14 @@ inputs:
 runs:
   using: composite
   steps:
-    # 자체 러너(macOS 기본 python3 는 3.9)에서도 같은 런타임으로 돌게 고정한다.
-    - uses: actions/setup-python@v5
+    # setup-python 은 self-hosted macOS 에서 호스트 러너 경로(/Users/runner)에 설치하려다 실패한다.
+    # 자체 러너는 이미 있는 python3(3.9+) · node(18+) 를 쓰고, 호스트 러너만 받아 쓴다.
+    - if: runner.environment == 'github-hosted'
+      uses: actions/setup-python@v5
       with:
         python-version: "3.13"
-    - uses: actions/setup-node@v4
+    - if: runner.environment == 'github-hosted'
+      uses: actions/setup-node@v4
       with:
         node-version: "22"
 
@@ -65,9 +68,13 @@ runs:
         CLAUDE_CODE_VERSION: ${{ inputs.claude-code-version }}
       run: |
         set -euo pipefail
-        for tool in gh git curl; do
+        for tool in gh git curl python3 node npm; do
           command -v "${tool}" >/dev/null || { echo "::error::러너에 ${tool} 이 없습니다."; exit 1; }
         done
+        python3 -c 'import sys; sys.exit(sys.version_info < (3, 9))' \
+          || { echo "::error::python3 3.9 이상이 필요합니다 ($(python3 --version))."; exit 1; }
+        node -e 'process.exit(Number(process.versions.node.split(".")[0]) < 18 ? 1 : 0)' \
+          || { echo "::error::node 18 이상이 필요합니다 ($(node --version))."; exit 1; }
         # 러너에 이미 깔린 claude 를 쓰지 않는다 — 버전이 고정되지 않고, 전역 설치는 권한이 없을 수 있다.
         prefix="${RUNNER_TOOL_CACHE:-${RUNNER_TEMP}}/pcr-claude-code/${CLAUDE_CODE_VERSION}"
         if [ ! -x "${prefix}/node_modules/.bin/claude" ]; then

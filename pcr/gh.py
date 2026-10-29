@@ -6,6 +6,8 @@
 - POST 성공 여부는 `gh` 의 exit code 로만 판단한다. 응답은 파일로 받아 따로 파싱한다.
 """
 
+from __future__ import annotations
+
 import json
 import os
 import subprocess

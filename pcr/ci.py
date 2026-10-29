@@ -8,6 +8,8 @@
 | `workflow_dispatch` (`pr_number`, `args`) | 명령 실행 |
 """
 
+from __future__ import annotations
+
 import json
 import os
 import shlex

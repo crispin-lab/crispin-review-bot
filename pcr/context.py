@@ -1,5 +1,7 @@
 """PR 컨텍스트 수집: 메타데이터 · diff · 연결 이슈 · head 체크아웃 · 컨벤션 · 기존 봇 지문."""
 
+from __future__ import annotations
+
 import json
 import os
 import re

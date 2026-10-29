@@ -1,5 +1,7 @@
 """finding 지문. 모델이 아니라 코드가 계산한다 (모델은 해시를 정확히 못 낸다)."""
 
+from __future__ import annotations
+
 import hashlib
 import re
 

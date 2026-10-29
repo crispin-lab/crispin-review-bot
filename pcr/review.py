@@ -1,5 +1,7 @@
 """리뷰 모드: 수집 → 판단(+비평) → 계획 → 게시."""
 
+from __future__ import annotations
+
 import json
 import os
 import sys

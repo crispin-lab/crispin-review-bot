@@ -1,5 +1,7 @@
 """대상 PR 과 플래그 파싱. 로컬 스킬 인자와 PR 코멘트 명령(`/pcr ...`)이 같은 파서를 쓴다."""
 
+from __future__ import annotations
+
 import os
 import re
 import shlex
