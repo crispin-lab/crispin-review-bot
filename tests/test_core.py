@@ -204,3 +204,12 @@ class JudgeIsolationTest(unittest.TestCase):
         self.assertIn("Bash", captured["command"])
         for key in secrets:
             self.assertNotIn(key, captured["env"])
+
+
+class GhStatusTest(unittest.TestCase):
+    def test_status_is_read_from_gh_error_output(self):
+        from pcr.gh import _status_of
+
+        self.assertEqual(_status_of("gh: Not Found (HTTP 404)"), 404)
+        self.assertEqual(_status_of("gh: Validation Failed (HTTP 422)\n{...}"), 422)
+        self.assertIsNone(_status_of("connection refused"))

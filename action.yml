@@ -110,6 +110,14 @@ runs:
           echo "::error::job 에 'id-token: write' 권한이 필요합니다."
           exit 1
         fi
+        missing=""
+        [ -n "${ANTHROPIC_FEDERATION_RULE_ID}" ] || missing="${missing} federation-rule-id"
+        [ -n "${ANTHROPIC_ORGANIZATION_ID}" ] || missing="${missing} organization-id"
+        [ -n "${ANTHROPIC_SERVICE_ACCOUNT_ID}" ] || missing="${missing} service-account-id"
+        if [ -n "${missing}" ]; then
+          echo "::error::Workload Identity Federation 값이 비어 있습니다:${missing}. 호출 워크플로가 넘기는 repository variable(vars.*) 이 등록돼 있는지 확인해 주세요 (secret 으로 등록하면 vars 로 읽히지 않습니다)."
+          exit 1
+        fi
         [ -n "${ANTHROPIC_WORKSPACE_ID}" ] || unset ANTHROPIC_WORKSPACE_ID
         # 정적 자격증명이 있으면 federation 보다 우선하므로 확실히 비운다.
         unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_AUTH_TOKEN

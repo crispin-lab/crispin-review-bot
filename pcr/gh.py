@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -45,12 +46,9 @@ def _env() -> dict[str, str]:
 
 
 def _status_of(stderr: str) -> int | None:
-    for token in stderr.replace("(", " ").replace(")", " ").split():
-        if token.startswith("HTTP"):
-            digits = token.removeprefix("HTTP").strip(":")
-            if digits.isdigit():
-                return int(digits)
-    return None
+    # gh 는 `gh: Not Found (HTTP 404)` 형태로 상태 코드를 남긴다.
+    match = re.search(r"\bHTTP (\d{3})\b", stderr)
+    return int(match.group(1)) if match else None
 
 
 def get(path: str, *, accept: str | None = None) -> object:
