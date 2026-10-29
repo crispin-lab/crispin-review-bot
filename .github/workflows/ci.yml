@@ -9,6 +9,7 @@ permissions:
   contents: read
 
 jobs:
+  # job 이름 `test` 는 main ruleset 의 필수 체크다. 바꾸면 PR 이 머지되지 않는다.
   test:
     runs-on: ubuntu-latest
     steps:
@@ -19,3 +20,13 @@ jobs:
       - run: python -m unittest discover -s tests -t .
       - name: 스키마 JSON 확인
         run: for file in schemas/*.json; do jq -e . "$file" > /dev/null; done
+
+  # 자체 러너(macOS 기본 python3)가 3.9 라 최저 지원 버전에서도 돌린다.
+  test-min-python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+      - run: python -m unittest discover -s tests -t .

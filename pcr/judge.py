@@ -10,6 +10,8 @@
 - 자식 프로세스 환경에서 GitHub 토큰 · OIDC 요청 자격을 지운다.
 """
 
+from __future__ import annotations
+
 import json
 import os
 import subprocess

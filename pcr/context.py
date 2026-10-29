@@ -1,5 +1,7 @@
 """PR 컨텍스트 수집: 메타데이터 · diff · 연결 이슈 · head 체크아웃 · 컨벤션 · 기존 봇 지문."""
 
+from __future__ import annotations
+
 import json
 import os
 import re
@@ -72,7 +74,17 @@ def bot_logins() -> list[str]:
 
 
 def collect(target: Target, *, with_prior: bool = True) -> tuple[Context, str]:
-    pr = gh.get(f"repos/{target.slug}/pulls/{target.number}")
+    try:
+        pr = gh.get(f"repos/{target.slug}/pulls/{target.number}")
+    except gh.GhError as error:
+        if error.status == 404:
+            # private 레포는 권한이 없어도 403 이 아니라 404 를 준다.
+            raise gh.GhError(
+                f"{target} 을 읽지 못했습니다 (404). PR 이 없거나 봇 토큰이 이 레포에 접근하지 못합니다 — "
+                "PAT 의 레포 선택 · org 승인 대기 · 봇 계정의 레포 권한을 확인해 주세요.",
+                404,
+            ) from error
+        raise
     files = gh.get_paginated(f"repos/{target.slug}/pulls/{target.number}/files?per_page=100")
     patch = gh.get_raw(f"repos/{target.slug}/pulls/{target.number}", accept="application/vnd.github.diff")
     head_sha = pr["head"]["sha"]

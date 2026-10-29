@@ -1,5 +1,7 @@
 """👀(시작) / 🎉(완료) 반응. 상태 신호일 뿐이라 실패해도 실행을 멈추지 않는다."""
 
+from __future__ import annotations
+
 import json
 import sys
 from pathlib import Path

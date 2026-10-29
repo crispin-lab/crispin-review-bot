@@ -4,6 +4,8 @@
 남지 않게 한다. 1차로 그런 줄을 지우고, 지운 뒤에도 남아 있으면 게시를 거부한다.
 """
 
+from __future__ import annotations
+
 import re
 
 # 줄 단위로 통째로 지우는 패턴. footer 형태로 붙는 표기가 대상이다.

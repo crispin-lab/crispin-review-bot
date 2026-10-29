@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import unittest
 
 from pcr import review
@@ -202,3 +204,38 @@ class JudgeIsolationTest(unittest.TestCase):
         self.assertIn("Bash", captured["command"])
         for key in secrets:
             self.assertNotIn(key, captured["env"])
+
+
+class GhStatusTest(unittest.TestCase):
+    def test_status_is_read_from_gh_error_output(self):
+        from pcr.gh import _status_of
+
+        self.assertEqual(_status_of("gh: Not Found (HTTP 404)"), 404)
+        self.assertEqual(_status_of("gh: Validation Failed (HTTP 422)\n{...}"), 422)
+        self.assertIsNone(_status_of("connection refused"))
+
+
+class CiReviewCommentTest(unittest.TestCase):
+    def run_event(self, association):
+        from unittest import mock
+
+        from pcr import ci
+
+        payload = {
+            "action": "created",
+            "comment": {"in_reply_to_id": 1, "user": {"login": "outsider"}, "author_association": association},
+            "pull_request": {"number": 5},
+        }
+        with mock.patch.object(ci, "_execute", return_value=0) as execute, \
+                mock.patch.object(ci.ctx_module, "bot_logins", return_value=["crispin-bot"]):
+            ci._on_review_comment("crispin-lab", "x", payload)
+        return execute
+
+    def test_reply_from_unprivileged_user_does_not_run(self):
+        for association in ["NONE", "CONTRIBUTOR", "COLLABORATOR"]:
+            self.run_event(association).assert_not_called()
+
+    def test_reply_from_member_runs_reply_mode(self):
+        execute = self.run_event("MEMBER")
+        execute.assert_called_once()
+        self.assertTrue(execute.call_args.args[0].reply)

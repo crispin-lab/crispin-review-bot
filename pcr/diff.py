@@ -1,5 +1,7 @@
 """unified diff 에서 인라인 코멘트를 달 수 있는 줄(RIGHT side)을 뽑는다."""
 
+from __future__ import annotations
+
 import re
 
 _HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")

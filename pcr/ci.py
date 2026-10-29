@@ -4,9 +4,11 @@
 |---|---|
 | `pull_request` (opened · reopened · ready_for_review · synchronize) | draft 가 아니면 리뷰 |
 | `issue_comment` 첫 줄 `/pcr ...` | 권한 확인 후 명령 실행 |
-| `pull_request_review_comment` (봇이 아닌 답글) | 답글 모드 |
+| `pull_request_review_comment` (권한 있는 사용자의 답글) | 답글 모드 |
 | `workflow_dispatch` (`pr_number`, `args`) | 명령 실행 |
 """
+
+from __future__ import annotations
 
 import json
 import os
@@ -62,9 +64,7 @@ def _on_command(owner: str, repo: str, payload: dict) -> int:
         return 0
     if options is None:
         return 0
-    allowed = {item.strip() for item in os.environ.get("PCR_ALLOWED_ASSOCIATIONS", "OWNER,MEMBER").split(",")}
-    if comment.get("author_association") not in allowed:
-        print(f"권한이 없는 사용자의 명령은 무시합니다 ({comment.get('author_association')}).")
+    if not _is_allowed(comment):
         return 0
     if options.help:
         from .cli import HELP_PATH
@@ -78,10 +78,22 @@ def _on_review_comment(owner: str, repo: str, payload: dict) -> int:
     comment = payload["comment"]
     if payload.get("action") != "created" or not comment.get("in_reply_to_id"):
         return 0
+    # 답글도 판단 단계(비용)를 부르므로 /pcr 명령과 같은 권한 기준을 적용한다.
+    if not _is_allowed(comment):
+        return 0
     if (comment.get("user") or {}).get("login") in ctx_module.bot_logins():
         return 0
     target = Target(owner, repo, payload["pull_request"]["number"])
     return _execute(Options(target=target, reply=True, yes=True))
+
+
+def _is_allowed(comment: dict) -> bool:
+    allowed = {item.strip() for item in os.environ.get("PCR_ALLOWED_ASSOCIATIONS", "OWNER,MEMBER").split(",")}
+    association = comment.get("author_association")
+    if association in allowed:
+        return True
+    print(f"권한이 없는 사용자의 요청은 무시합니다 ({association}).")
+    return False
 
 
 def _execute(options: Options) -> int:

@@ -1,5 +1,7 @@
 """답글 모드: 봇이 시작한 미해결 스레드의 답글에 응답하고, 수정이 확인되면 resolve 한다."""
 
+from __future__ import annotations
+
 import base64
 import json
 import sys

@@ -50,15 +50,39 @@ inputs:
 runs:
   using: composite
   steps:
+    # setup-python 은 self-hosted macOS 에서 호스트 러너 경로(/Users/runner)에 설치하려다 실패한다.
+    # 자체 러너는 이미 있는 python3(3.9+) · node(18+) 를 쓰고, 호스트 러너만 받아 쓴다.
+    - if: runner.environment == 'github-hosted'
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.13"
+    - if: runner.environment == 'github-hosted'
+      uses: actions/setup-node@v4
+      with:
+        node-version: "22"
+
     - name: 판단 단계 CLI 준비
+      id: cli
       shell: bash
       env:
         CLAUDE_CODE_VERSION: ${{ inputs.claude-code-version }}
       run: |
-        if ! command -v claude >/dev/null 2>&1; then
-          npm install --global --no-fund --no-audit "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" >/dev/null
+        set -euo pipefail
+        for tool in gh git curl python3 node npm; do
+          command -v "${tool}" >/dev/null || { echo "::error::러너에 ${tool} 이 없습니다."; exit 1; }
+        done
+        python3 -c 'import sys; sys.exit(sys.version_info < (3, 9))' \
+          || { echo "::error::python3 3.9 이상이 필요합니다 ($(python3 --version))."; exit 1; }
+        node -e 'process.exit(Number(process.versions.node.split(".")[0]) < 18 ? 1 : 0)' \
+          || { echo "::error::node 18 이상이 필요합니다 ($(node --version))."; exit 1; }
+        # 러너에 이미 깔린 claude 를 쓰지 않는다 — 버전이 고정되지 않고, 전역 설치는 권한이 없을 수 있다.
+        prefix="${RUNNER_TOOL_CACHE:-${RUNNER_TEMP}}/pcr-claude-code/${CLAUDE_CODE_VERSION}"
+        if [ ! -x "${prefix}/node_modules/.bin/claude" ]; then
+          npm install --prefix "${prefix}" --no-fund --no-audit --loglevel=error \
+            "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
         fi
-        claude --version
+        "${prefix}/node_modules/.bin/claude" --version
+        echo "bin=${prefix}/node_modules/.bin/claude" >> "${GITHUB_OUTPUT}"
 
     - name: 리뷰 실행
       shell: bash
@@ -68,6 +92,7 @@ runs:
         ANTHROPIC_ORGANIZATION_ID: ${{ inputs.organization-id }}
         ANTHROPIC_SERVICE_ACCOUNT_ID: ${{ inputs.service-account-id }}
         ANTHROPIC_WORKSPACE_ID: ${{ inputs.workspace-id }}
+        PCR_CLAUDE_BIN: ${{ steps.cli.outputs.bin }}
         PCR_MODEL: ${{ inputs.model }}
         PCR_MODEL_CRITIC: ${{ inputs.critic-model }}
         PCR_DEFAULT_ARGS: ${{ inputs.default-args }}
@@ -85,22 +110,34 @@ runs:
           echo "::error::job 에 'id-token: write' 권한이 필요합니다."
           exit 1
         fi
+        missing=""
+        [ -n "${ANTHROPIC_FEDERATION_RULE_ID}" ] || missing="${missing} federation-rule-id"
+        [ -n "${ANTHROPIC_ORGANIZATION_ID}" ] || missing="${missing} organization-id"
+        [ -n "${ANTHROPIC_SERVICE_ACCOUNT_ID}" ] || missing="${missing} service-account-id"
+        if [ -n "${missing}" ]; then
+          echo "::error::Workload Identity Federation 값이 비어 있습니다:${missing}. 호출 워크플로가 넘기는 repository variable(vars.*) 이 등록돼 있는지 확인해 주세요 (secret 으로 등록하면 vars 로 읽히지 않습니다)."
+          exit 1
+        fi
         [ -n "${ANTHROPIC_WORKSPACE_ID}" ] || unset ANTHROPIC_WORKSPACE_ID
         # 정적 자격증명이 있으면 federation 보다 우선하므로 확실히 비운다.
         unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_AUTH_TOKEN
+        # 자체 러너 사용자의 ~/.claude (hooks · 플러그인 · 로그인) 가 섞이지 않게 빈 설정 디렉토리를 쓴다.
+        export CLAUDE_CONFIG_DIR="${RUNNER_TEMP}/pcr-claude-config"
+        rm -rf "${CLAUDE_CONFIG_DIR}" && mkdir -p "${CLAUDE_CONFIG_DIR}"
 
         export ANTHROPIC_IDENTITY_TOKEN_FILE="${RUNNER_TEMP}/pcr-oidc.jwt"
         fetch_identity_token() {
           curl -sSf -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
             "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https://api.anthropic.com" \
-            | jq -r .value > "${ANTHROPIC_IDENTITY_TOKEN_FILE}.tmp"
+            | python3 -c 'import json, sys; print(json.load(sys.stdin)["value"])' \
+            > "${ANTHROPIC_IDENTITY_TOKEN_FILE}.tmp"
           mv "${ANTHROPIC_IDENTITY_TOKEN_FILE}.tmp" "${ANTHROPIC_IDENTITY_TOKEN_FILE}"
         }
         fetch_identity_token
         # GitHub OIDC 토큰은 약 5분 뒤 만료된다. 긴 리뷰 중에도 파일이 유효하게 갱신한다.
         ( while sleep 240; do fetch_identity_token || true; done ) &
         refresher=$!
-        trap 'kill "${refresher}" 2>/dev/null || true' EXIT
+        trap 'kill "${refresher}" 2>/dev/null || true; rm -rf "${CLAUDE_CONFIG_DIR}" "${ANTHROPIC_IDENTITY_TOKEN_FILE}" "${RUNNER_TEMP}/pcr"' EXIT
 
         export PCR_WORK_DIR="${RUNNER_TEMP}/pcr"
         "${GITHUB_ACTION_PATH}/bin/pcr" ci

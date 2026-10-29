@@ -5,6 +5,8 @@
     pcr ci                   GitHub Actions 이벤트를 읽어 알맞은 모드로 실행
 """
 
+from __future__ import annotations
+
 import sys
 
 from . import ci, judge, review
