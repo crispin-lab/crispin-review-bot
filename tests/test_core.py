@@ -8,7 +8,7 @@ from pcr.diff import commentable_lines, is_generated
 from pcr.fingerprint import finding_fingerprint, markers_in, strip_markers, summary_fingerprint
 from pcr.judge import validate
 from pcr.reply import _keep
-from pcr.sanitize import AttributionError, SecretLeakError, sanitize
+from pcr.sanitize import AttributionError, SecretLeakError, sanitize, violation
 from pcr.target import ArgsError, Target, parse, parse_command
 
 PATCH = """diff --git a/src/a.ts b/src/a.ts
@@ -138,16 +138,20 @@ class ReplyFilterTest(unittest.TestCase):
         self.assertFalse(_keep(self.thread("crispin-bot", "crispin", resolved=True), bots))
 
 
+def make_context(**overrides):
+    base = dict(
+        owner="crispin-lab", repo="x", number=1, title="t", body="", author="a", head_sha="abcdef1234",
+        base_ref="main", head_ref="f", state="open", draft=False, additions=3, deletions=1,
+        changed_files=2, files=[], linked_issues=[], bot_logins=["crispin-bot"], prior_fingerprints=[],
+        prior_findings=[], conventions="", convention_files=[],
+    )
+    base.update(overrides)
+    return Context(**base)
+
+
 class SummaryTest(unittest.TestCase):
     def context(self, **overrides):
-        base = dict(
-            owner="crispin-lab", repo="x", number=1, title="t", body="", author="a", head_sha="abcdef1234",
-            base_ref="main", head_ref="f", state="open", draft=False, additions=3, deletions=1,
-            changed_files=2, files=[], linked_issues=[], bot_logins=["crispin-bot"], prior_fingerprints=[],
-            prior_findings=[], conventions="", convention_files=[],
-        )
-        base.update(overrides)
-        return Context(**base)
+        return make_context(**overrides)
 
     def test_sections_order_and_empty_sections_omitted(self):
         raw = {"scope": "설정 화면 추가.", "risks": [], "themes": []}
@@ -257,3 +261,56 @@ class FailureReasonTest(unittest.TestCase):
         from pcr.judge import failure_reason
 
         self.assertIn("끝", failure_reason("앞" * 2000 + "끝", ""))
+
+
+class PlanAttributionTest(unittest.TestCase):
+    """대상 레포 룰이 금지 문구 자체를 담고 있어, 근거를 인용한 조각이 걸릴 수 있다."""
+
+    RULE_QUOTE = "rules/commit.md §커밋 — Claude, AI 어시스턴트, 생성 도구 같은 표현을 넣지 않는다"
+
+    def plan(self, inline, raw=None, unplaced=(), critic_note=None):
+        raw = raw or {"scope": "역할 필터 추가.", "risks": [], "themes": []}
+        return review._plan(make_context(), raw, list(inline), list(unplaced), critic_note)
+
+    def test_quoting_rule_drops_only_that_finding(self):
+        dirty = review.Finding("a.kt", 10, "conventions", f"근거: {self.RULE_QUOTE}", None, "a" * 12)
+        clean = review.Finding("b.kt", 20, "tests", "검증을 막는 IO 전부에 단언을 넣어 주세요.", None, "b" * 12)
+        plan = self.plan([dirty, clean])
+        self.assertEqual([c["path"] for c in plan["comments"]], ["b.kt"])
+        self.assertEqual(plan["stats"]["inline"], 1)
+
+    def test_only_reference_is_dropped_when_body_is_clean(self):
+        finding = review.Finding("a.kt", 10, "conventions", "Dto suffix 를 붙여 주세요.", self.RULE_QUOTE, "c" * 12)
+        plan = self.plan([finding])
+        body = plan["comments"][0]["body"]
+        self.assertIn("Dto suffix", body)
+        self.assertNotIn("근거:", body)
+
+    def test_dirty_summary_fields_are_dropped(self):
+        raw = {"scope": "AI 가 작성한 변경입니다.", "risks": ["생성 도구 표기 위험", "진짜 위험"], "themes": []}
+        finding = review.Finding("b.kt", 20, "tests", "테스트가 없습니다.", None, "d" * 12)
+        plan = self.plan([finding], raw=raw)
+        self.assertIn("- 진짜 위험", plan["body"])
+        self.assertNotIn("생성 도구", plan["body"])
+        self.assertNotIn("AI 가 작성", plan["body"])
+        self.assertIn("## Scope\n2 files, +3/-1.\n", plan["body"])
+
+    def test_losing_every_finding_fails_loudly(self):
+        dirty = review.Finding("a.kt", 10, "conventions", f"근거: {self.RULE_QUOTE}", None, "e" * 12)
+        with self.assertRaises(AttributionError):
+            self.plan([dirty])
+
+    def test_clean_run_is_untouched(self):
+        finding = review.Finding("b.kt", 20, "tests", "테스트가 없습니다.", "test.md §Kotest", "f" * 12)
+        plan = self.plan([finding], critic_note="Critic: kept 1 / dropped 0.")
+        self.assertIn("근거: test.md §Kotest", plan["comments"][0]["body"])
+        self.assertIn("Critic: kept 1 / dropped 0.", plan["body"])
+
+
+class ViolationTest(unittest.TestCase):
+    def test_reports_match_without_raising(self):
+        self.assertEqual(violation("근거: 생성 도구 표현을 넣지 않는다"), "생성 도구")
+        self.assertIsNone(violation("`role` 파라미터 검증이 빠졌습니다."))
+
+    def test_footer_only_text_is_clean_after_stripping(self):
+        self.assertIsNone(violation("본문\nCo-Authored-By: Someone <a@b.c>"))

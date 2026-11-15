@@ -15,7 +15,7 @@ from . import gh, judge, reactions
 from .context import Context
 from .diff import commentable_lines, is_generated
 from .fingerprint import finding_fingerprint, marker, strip_markers, summary_fingerprint
-from .sanitize import sanitize
+from .sanitize import AttributionError, sanitize, violation
 from .target import Options, Target
 
 RATE_LIMIT = timedelta(minutes=10)
@@ -247,6 +247,7 @@ def _where(findings: list[Finding], fingerprint: str) -> str:
 
 def _plan(context: Context, raw: dict, inline: list[Finding], unplaced: list[Finding], critic_note: str | None) -> dict:
     run_id = uuid.uuid4().hex[:12]
+    raw, inline, unplaced, critic_note = _drop_attribution(raw, inline, unplaced, critic_note)
     body = _summary(context, raw, inline, unplaced, critic_note, run_id)
     comments = [
         {"path": f.path, "line": f.line, "side": "RIGHT", "body": sanitize(f.comment_body())} for f in inline
@@ -267,10 +268,47 @@ def _plan(context: Context, raw: dict, inline: list[Finding], unplaced: list[Fin
     }
 
 
+def _drop_attribution(raw: dict, inline: list[Finding], unplaced: list[Finding], critic_note: str | None):
+    """판단 단계가 컨벤션 문구를 인용하다 생성 도구 표기를 섞으면 그 조각만 버린다.
+
+    대상 레포의 룰 파일이 그 표기를 금지하는 문장을 담고 있어(예: `rules/commit.md`), 근거를
+    인용한 finding 하나가 리뷰 전체를 막을 수 있다. 게시 직전 `sanitize()` 는 그대로 둔다 —
+    여기서는 한 문장 때문에 리뷰 전체를 버리지 않게 걸린 조각만 떨어뜨린다.
+    """
+    dropped: list[str] = []
+
+    def keep(label: str, text: str) -> bool:
+        found = violation(text)
+        if found is None:
+            return True
+        dropped.append(label)
+        print(f"경고: {label} 에 생성 도구 표기가 있어 버립니다: {found!r}", file=sys.stderr)
+        return False
+
+    raw = {
+        **raw,
+        "scope": raw["scope"] if keep("scope", raw["scope"]) else "",
+        "risks": [risk for risk in raw["risks"] if keep("risk", risk)],
+        "themes": [theme for theme in raw["themes"] if keep("theme", theme)],
+    }
+    inline = [f for f in inline if keep(f"{f.path}:{f.line}", f.body)]
+    unplaced = [f for f in unplaced if keep(f"{f.path}:{f.line}", f.body)]
+    for finding in inline + unplaced:
+        if finding.rule_ref and not keep(f"{finding.path}:{finding.line} 근거", finding.rule_ref):
+            finding.rule_ref = None
+    if critic_note and not keep("비평 메모", critic_note):
+        critic_note = None
+    if dropped and not (inline or unplaced):
+        # 지적을 전부 버린 채로 "이상 없음" 리뷰를 게시하지 않는다.
+        raise AttributionError(f"판단 단계 출력이 모두 생성 도구 표기에 걸렸습니다: {', '.join(dropped)}")
+    return raw, inline, unplaced, critic_note
+
+
 def _summary(context, raw, inline, unplaced, critic_note, run_id) -> str:
     new_count = len(inline) + len(unplaced)
     prior = len(context.prior_fingerprints)
-    sections = [f"## Scope\n{context.changed_files} files, +{context.additions}/-{context.deletions}. {raw['scope'].strip()}"]
+    scope = f"{context.changed_files} files, +{context.additions}/-{context.deletions}. {raw['scope'].strip()}"
+    sections = [f"## Scope\n{scope.rstrip()}"]
 
     risks = [f"- {risk.strip()}" for risk in raw["risks"] if risk.strip()] if new_count else []
     risks += [f"- `{f.path}:{f.line}` — {f.body.strip()}" for f in unplaced]
