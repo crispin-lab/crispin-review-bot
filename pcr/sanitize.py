@@ -52,16 +52,33 @@ class SecretLeakError(ValueError):
 
 
 def sanitize(body: str) -> str:
-    lines = [line for line in body.splitlines() if not _is_attribution_line(line)]
-    cleaned = "\n".join(_drop_dangling_rule(lines)).rstrip() + "\n"
+    cleaned = strip_attribution_lines(body)
     for pattern in _SECRET_PATTERNS:
         if pattern.search(cleaned):
             raise SecretLeakError("게시 본문에 비밀값으로 보이는 문자열이 있어 게시하지 않습니다.")
+    found = violation(cleaned)
+    if found:
+        raise AttributionError(f"게시 본문에 생성 도구 표기가 남아 있습니다: {found!r}")
+    return cleaned
+
+
+def strip_attribution_lines(body: str) -> str:
+    lines = [line for line in body.splitlines() if not _is_attribution_line(line)]
+    return "\n".join(_drop_dangling_rule(lines)).rstrip() + "\n"
+
+
+def violation(body: str) -> str | None:
+    """막아야 할 표기가 남는지 본다. 게시를 막지 않고 걸린 문구만 알려 준다.
+
+    조각(finding 본문 · 근거 · 요약 항목) 하나를 버릴지 판단할 때 쓴다. 게시 직전 검사는
+    `sanitize()` 가 그대로 맡는다 — 이 함수는 그 검사를 대신하거나 우회하지 않는다.
+    """
+    cleaned = strip_attribution_lines(body)
     for pattern in _FORBIDDEN_PATTERNS:
         match = pattern.search(cleaned)
         if match:
-            raise AttributionError(f"게시 본문에 생성 도구 표기가 남아 있습니다: {match.group(0)!r}")
-    return cleaned
+            return match.group(0)
+    return None
 
 
 def _is_attribution_line(line: str) -> bool:
