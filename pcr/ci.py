@@ -80,35 +80,33 @@ def _on_review_comment(owner: str, repo: str, payload: dict) -> int:
         return 0
     if (comment.get("user") or {}).get("login") in ctx_module.bot_logins():
         return 0
-    # 답글도 판단 단계(비용)를 부르므로 /pcr 명령과 같은 권한 기준을 적용한다.
-    if not _is_allowed(comment):
+    # payload 의 `author_association` 을 쓰지 않는다. 이 이벤트의 payload 만 그 값을 `CONTRIBUTOR` 로
+    # 주고, 같은 코멘트를 REST 는 `MEMBER` 로 보고한다 (2026-11-17 측정 — 그래서 호출 워크플로의 `if` 가
+    # 그 조건을 두는 동안 멤버의 답글이 하나도 통과하지 못했다). 권한은 판단 단계(비용)를 여는 문이라
+    # 느슨하게 두는 대신 REST 값으로 판정하고, 같은 조회가 `in_reply_to_id` 도 함께 준다.
+    fetched = _fetch_comment(owner, repo, comment.get("id"))
+    if fetched is None:
         return 0
-    if not _is_reply(owner, repo, comment):
+    # 답글도 판단 단계(비용)를 부르므로 /pcr 명령과 같은 권한 기준을 적용한다.
+    if not _is_allowed(fetched):
+        return 0
+    if not fetched.get("in_reply_to_id"):
         print("스레드 답글이 아닌 인라인 코멘트입니다. 건너뜁니다.")
         return 0
     target = Target(owner, repo, payload["pull_request"]["number"])
     return _execute(Options(target=target, reply=True, yes=True))
 
 
-def _is_reply(owner: str, repo: str, comment: dict) -> bool:
-    """payload 의 `in_reply_to_id` 를 믿지 않는다.
-
-    webhook 스키마에서 이 필드는 optional 이고, 실제로 답글에도 실려 오지 않는다 — 호출 레포 두 곳에서
-    `pull_request_review_comment` 실행 100 건이 전부 워크플로 `if` 에 걸러졌다 (2026-11-17 확인). 그래서
-    호출 워크플로의 `if` 도 이 조건을 보지 않고, 여기서 REST 단건 조회로 확인한다 (그쪽엔 항상 실려 온다).
-    """
-    if comment.get("in_reply_to_id"):
-        return True
-    comment_id = comment.get("id")
+def _fetch_comment(owner: str, repo: str, comment_id: object) -> dict | None:
+    """리뷰 코멘트를 REST 로 다시 읽는다. 실패하면 `None` — 확인하지 못한 채 도는 쪽이 비싸다."""
     if not comment_id:
-        return False
+        return None
     try:
         fetched = gh.get(f"repos/{owner}/{repo}/pulls/comments/{comment_id}")
     except gh.GhError as error:
-        # 조회가 실패하면 답글로 보지 않는다 — 판단 단계는 비용이 들어 기본값은 돌지 않는 쪽이다.
-        print(f"경고: 코멘트 {comment_id} 조회 실패, 답글로 보지 않습니다: {error}", file=sys.stderr)
-        return False
-    return bool(isinstance(fetched, dict) and fetched.get("in_reply_to_id"))
+        print(f"경고: 코멘트 {comment_id} 조회 실패, 건너뜁니다: {error}", file=sys.stderr)
+        return None
+    return fetched if isinstance(fetched, dict) else None
 
 
 def _is_allowed(comment: dict) -> bool:
