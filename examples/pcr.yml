@@ -23,12 +23,10 @@ permissions:
   id-token: write
 
 jobs:
-  # 답글인지만 가린다. 이 게이트가 따로 있어야 아래 concurrency 의 대기 슬롯을 **아무 일도 하지 않을
-  # 실행이 차지하지 않는다.** payload 의 `in_reply_to_id` 가 답글에도 비어 와서(crispin-review-bot#5)
-  # `if` 로는 답글을 가릴 수 없는데, 그 조건을 그냥 빼면 멤버가 새로 다는 인라인 코멘트도 통과해
-  # 대기 중이던 답글 재리뷰를 밀어내 취소시킨다 — 답글이 조용히 유실된다.
-  triage:
+  pcr:
     # 러너를 띄우기 전에 걸러 낸다. 같은 검사를 pcr 도 다시 한다.
+    # 답글 여부는 여기서 보지 않는다 — payload 의 `in_reply_to_id` 가 답글에도 비어 와서, 그 조건을 두면
+    # 스레드 답글이 하나도 통과하지 못한다. pcr 이 REST 단건 조회로 확인한다 (`pcr/ci.py` 의 `_is_reply`).
     if: >-
       (github.event_name == 'pull_request' && !github.event.pull_request.draft) ||
       (github.event_name == 'issue_comment' && github.event.issue.pull_request &&
@@ -38,46 +36,12 @@ jobs:
         github.event.comment.user.login != 'crispin-bot' &&
         contains(fromJSON('["OWNER","MEMBER"]'), github.event.comment.author_association)) ||
       github.event_name == 'workflow_dispatch'
-    runs-on: ${{ vars.PCR_RUNNER || vars.CI_RUNNER || 'ubuntu-latest' }}
-    timeout-minutes: 5
-    permissions:
-      contents: read
-      pull-requests: read
-    outputs:
-      run: ${{ steps.check.outputs.run }}
-    steps:
-      # REST 단건 조회에는 `in_reply_to_id` 가 항상 실려 온다. 조회 실패는 job 실패로 남겨 둔다 —
-      # 조용히 건너뛰면 답글이 유실된 것과 구분되지 않는다. 리뷰(pull_request)는 조회 전에 빠진다.
-      - id: check
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          COMMENT_ID: ${{ github.event.comment.id }}
-        run: |
-          set -euo pipefail
-          if [ "${GITHUB_EVENT_NAME}" != "pull_request_review_comment" ]; then
-            echo "run=true" >> "${GITHUB_OUTPUT}"
-            exit 0
-          fi
-          reply_to=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/comments/${COMMENT_ID}" \
-            --jq '.in_reply_to_id // empty')
-          if [ -n "${reply_to}" ]; then
-            echo "run=true" >> "${GITHUB_OUTPUT}"
-          else
-            echo "스레드 답글이 아닌 인라인 코멘트입니다. 리뷰 봇을 띄우지 않습니다."
-            echo "run=false" >> "${GITHUB_OUTPUT}"
-          fi
-
-  pcr:
-    needs: triage
-    if: needs.triage.outputs.run == 'true'
     # 자체 러너를 쓰는 레포는 repository variable 로 지정한다 (예: CI 와 같은 맥미니 러너).
     runs-on: ${{ vars.PCR_RUNNER || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 20
-    # job 수준에 둬야 걸러진 실행(일반 코멘트 · 봇이 게시하며 생긴 이벤트 · 답글 아닌 인라인 코멘트)이
-    # 그룹에 들어오지 않는다. workflow 수준이면 그런 실행이 대기 중이던 /pcr · 답글 실행을 밀어내
-    # 취소시킨다. 게시 도중 끊기면 리뷰가 반쯤 남을 수 있어 실행 중인 것은 취소하지 않는다.
-    # 대기 슬롯은 PR 당 하나뿐이고, 새로 대기하는 실행이 먼저 대기 중이던 것을 취소한다.
+    # job 수준에 둬야 if 에서 걸러진 실행(일반 코멘트 · 봇이 게시하며 생긴 이벤트)이 그룹에 들어오지 않는다.
+    # workflow 수준이면 그런 실행이 대기 중이던 /pcr · 답글 실행을 밀어내 취소시킨다.
+    # 게시 도중 끊기면 리뷰가 반쯤 남을 수 있어 실행 중인 것은 취소하지 않는다. 대기 슬롯은 PR 당 하나뿐이다.
     concurrency:
       group: pcr-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr_number }}
       cancel-in-progress: false
